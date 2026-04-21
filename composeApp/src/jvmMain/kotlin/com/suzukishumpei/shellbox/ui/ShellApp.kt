@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,8 +52,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.suzukishumpei.shellbox.domain.ScriptEntry
 import com.suzukishumpei.shellbox.runtime.LogStream
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.awt.Window
 
@@ -250,7 +253,6 @@ private fun ScriptListScreen(
         )
         return
     }
-    val categoryScroll = rememberScrollState()
     var searchQuery by remember { mutableStateOf("") }
     val filteredScripts = remember(scripts, searchQuery) {
         val q = searchQuery.trim().lowercase()
@@ -471,6 +473,8 @@ private fun DetailScreen(
     }
 }
 
+private const val RunDialogAutoDismissMs = 700L
+
 @Composable
 private fun RunDialog(
     state: RunDialogState,
@@ -480,15 +484,47 @@ private fun RunDialog(
 ) {
     var stdinLine by remember(state.scriptId) { mutableStateOf("") }
 
-    Dialog(onDismissRequest = { if (!state.isRunning) onDismiss() }) {
-        Card(modifier = Modifier.fillMaxWidth().height(480.dp)) {
-            Column(modifier = Modifier.padding(16.dp).fillMaxSize()) {
-                Text(state.title, style = MaterialTheme.typography.titleMedium)
-                Text("ID: ${state.scriptId}", style = MaterialTheme.typography.bodySmall)
-                Spacer(modifier = Modifier.height(8.dp))
+    LaunchedEffect(state.scriptId, state.exitCode) {
+        if (state.exitCode != null && !state.isRunning) {
+            delay(RunDialogAutoDismissMs)
+            onDismiss()
+        }
+    }
+
+    Dialog(
+        onDismissRequest = { if (!state.isRunning) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.90f),
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp).fillMaxSize()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = state.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "ID: ${state.scriptId}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
                 LazyColumn(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
                     items(state.logs.size) { i ->
                         val line = state.logs[i]
@@ -505,7 +541,7 @@ private fun RunDialog(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -527,11 +563,13 @@ private fun RunDialog(
                             },
                         singleLine = true,
                         label = { Text("標準入力（行）") },
-                        supportingText = {
-                            Text(
-                                text = "空のまま「送信」または Enter キーで、シェルの改行入力（read の Enter 相当）を送れます。",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                        placeholder = {
+                            if (state.isRunning) {
+                                Text(
+                                    text = "空のまま送信 / Enter で改行を送る",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
                         },
                         enabled = state.isRunning,
                     )

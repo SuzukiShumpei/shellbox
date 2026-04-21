@@ -147,6 +147,7 @@ class ShellViewModel(
                     when {
                         pruned.isEmpty() || pruned.toSet() == allCats ->
                             s.copy(visibleScriptCategories = null)
+
                         else ->
                             s.copy(visibleScriptCategories = pruned.sorted())
                     }
@@ -220,7 +221,12 @@ class ShellViewModel(
                 _runDialog.value = RunDialogState(
                     scriptId = entry.id,
                     title = entry.title,
-                    logs = listOf(LogLine(LogStream.Err, "実行できる .sh / .command が見つかりません。")),
+                    logs = listOf(
+                        LogLine(
+                            LogStream.Err,
+                            "実行できる .sh / .command が見つかりません。"
+                        )
+                    ),
                     isRunning = false,
                     exitCode = null,
                 )
