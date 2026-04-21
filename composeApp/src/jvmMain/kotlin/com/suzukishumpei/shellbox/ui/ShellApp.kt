@@ -1,0 +1,427 @@
+package com.suzukishumpei.shellbox.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import com.suzukishumpei.shellbox.domain.ScriptEntry
+import com.suzukishumpei.shellbox.runtime.LogStream
+import kotlinx.coroutines.launch
+import java.awt.Window
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun App(parentWindow: Window?) {
+    // Release DMG では ProGuard により viewModel() 経由の Factory デフォルト実装が壊れるため、
+    // Compose の viewModel() は使わず 1 ウィンドウ 1 インスタンスで保持する。
+    val vm = remember { ShellViewModel() }
+    ShellApp(vm, parentWindow)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ShellApp(vm: ShellViewModel, parentWindow: Window?) {
+    val settings by vm.settings.collectAsState()
+    val scripts by vm.scripts.collectAsState()
+    val scanError by vm.scanError.collectAsState()
+    val route by vm.route.collectAsState()
+    val runDialog by vm.runDialog.collectAsState()
+    val scope = rememberCoroutineScope()
+    val pick: suspend () -> String? = remember(parentWindow) {
+        { pickDirectory(parentWindow) }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "Shell Box",
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                actions = {
+                    if (settings.projectRootPath != null) {
+                        TextButton(onClick = { vm.refreshScan() }) {
+                            Text("再取得")
+                        }
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp),
+        ) {
+            when (val r = route) {
+                ShellRoute.List -> {
+                    if (settings.projectRootPath == null) {
+                        ProjectRootEmpty(onChoose = {
+                            scope.launch {
+                                val p = pick()
+                                if (p != null) vm.setProjectRoot(p)
+                            }
+                        })
+                    } else {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            itemVerticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "プロジェクト: ${settings.projectRootPath}",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        val p = pick()
+                                        if (p != null) vm.setProjectRoot(p)
+                                    }
+                                },
+                            ) {
+                                Text("プロジェクト変更")
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        scanError?.let { err ->
+                            Text(
+                                text = err,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        ScriptListScreen(
+                            scripts = scripts,
+                            cwdById = settings.workingDirectoryByScriptId,
+                            onDetail = { vm.navigateToDetail(it) },
+                            onRun = { vm.runScript(it, pick) },
+                            onPickCwd = { id ->
+                                scope.launch {
+                                    vm.pickAndSetWorkingDirectory(id, pick)
+                                }
+                            },
+                            onUseProjectRoot = { id ->
+                                vm.useProjectRootAsWorkingDirectory(id)
+                            },
+                        )
+                    }
+                }
+
+                is ShellRoute.Detail -> {
+                    DetailScreen(
+                        entry = r.entry,
+                        cwd = settings.workingDirectoryByScriptId[r.entry.id],
+                        onBack = { vm.navigateToList() },
+                        onRun = { vm.runScript(r.entry, pick) },
+                        onPickCwd = {
+                            scope.launch {
+                                vm.pickAndSetWorkingDirectory(r.entry.id, pick)
+                            }
+                        },
+                        onUseProjectRoot = {
+                            vm.useProjectRootAsWorkingDirectory(r.entry.id)
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    runDialog?.let { state ->
+        RunDialog(
+            state = state,
+            onDismiss = { vm.dismissRunDialog() },
+            onStop = { vm.stopRun() },
+            onSendStdin = { vm.sendStdinLine(it) },
+        )
+    }
+}
+
+@Composable
+private fun ProjectRootEmpty(onChoose: () -> Unit) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = "clone した shellbox リポジトリのルート（scripts フォルダを含むパス）を指定してください。",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Button(onClick = onChoose) {
+            Text("フォルダを選択")
+        }
+    }
+}
+
+@Composable
+private fun ScriptListScreen(
+    scripts: List<ScriptEntry>,
+    cwdById: Map<String, String>,
+    onDetail: (ScriptEntry) -> Unit,
+    onRun: (ScriptEntry) -> Unit,
+    onPickCwd: (String) -> Unit,
+    onUseProjectRoot: (String) -> Unit,
+) {
+    if (scripts.isEmpty()) {
+        Text("スクリプトがありません。scripts/ 配下にディレクトリを作成してください。")
+        return
+    }
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        items(scripts, key = { it.id }) { entry ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(text = entry.title, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = "ID: ${entry.id}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    cwdById[entry.id]?.let { cwd ->
+                        Text(
+                            text = "実行 path: $cwd",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    } ?: Text(
+                        text = "実行 path: 未設定（実行時に選択）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onUseProjectRoot(entry.id) }
+                        ) {
+                            Text(
+                                text = "実行 path 指定なし",
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { onPickCwd(entry.id) }
+                        ) {
+                            Text(
+                                text = "実行 path を選択",
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { onDetail(entry) }
+                        ) {
+                            Text(
+                                text = "詳細",
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Button(
+                            onClick = { onRun(entry) }
+                        ) {
+                            Text(
+                                text = "実行",
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailScreen(
+    entry: ScriptEntry,
+    cwd: String?,
+    onBack: () -> Unit,
+    onRun: () -> Unit,
+    onPickCwd: () -> Unit,
+    onUseProjectRoot: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(onClick = onBack) { Text("戻る") }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(entry.title, style = MaterialTheme.typography.titleLarge)
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        cwd?.let {
+            Text(
+                "実行 path: $it",
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall
+            )
+        } ?: Text(
+            "実行 path: 未設定",
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onUseProjectRoot) { Text("実行 path 指定なし") }
+            OutlinedButton(onClick = onPickCwd) { Text("実行 path を選択") }
+            Button(onClick = onRun) { Text("実行") }
+        }
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        SelectionContainer(
+            modifier = Modifier.weight(1f),
+        ) {
+            Text(
+                text = entry.readmeFullText.ifBlank { "（README.md が空か存在しません）" },
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RunDialog(
+    state: RunDialogState,
+    onDismiss: () -> Unit,
+    onStop: () -> Unit,
+    onSendStdin: (String) -> Unit,
+) {
+    var stdinLine by remember(state.scriptId) { mutableStateOf("") }
+
+    Dialog(onDismissRequest = { if (!state.isRunning) onDismiss() }) {
+        Card(modifier = Modifier.fillMaxWidth().height(480.dp)) {
+            Column(modifier = Modifier.padding(16.dp).fillMaxSize()) {
+                Text(state.title, style = MaterialTheme.typography.titleMedium)
+                Text("ID: ${state.scriptId}", style = MaterialTheme.typography.bodySmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    items(state.logs.size) { i ->
+                        val line = state.logs[i]
+                        val color = when (line.stream) {
+                            LogStream.Out -> MaterialTheme.colorScheme.onSurface
+                            LogStream.Err -> MaterialTheme.colorScheme.error
+                        }
+                        Text(
+                            text = line.text,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = color,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    OutlinedTextField(
+                        value = stdinLine,
+                        onValueChange = { stdinLine = it },
+                        modifier = Modifier
+                            .weight(1f)
+                            .onPreviewKeyEvent { event ->
+                                if (!state.isRunning) return@onPreviewKeyEvent false
+                                if (event.type != KeyEventType.KeyDown || event.key != Key.Enter) {
+                                    return@onPreviewKeyEvent false
+                                }
+                                onSendStdin(stdinLine)
+                                stdinLine = ""
+                                true
+                            },
+                        singleLine = true,
+                        label = { Text("標準入力（行）") },
+                        supportingText = {
+                            Text(
+                                text = "空のまま「送信」または Enter キーで、シェルの改行入力（read の Enter 相当）を送れます。",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        },
+                        enabled = state.isRunning,
+                    )
+                    Button(
+                        onClick = {
+                            onSendStdin(stdinLine)
+                            stdinLine = ""
+                        },
+                        enabled = state.isRunning,
+                    ) {
+                        Text("送信")
+                    }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (state.isRunning) {
+                        Button(onClick = onStop) { Text("停止") }
+                    }
+                    TextButton(
+                        onClick = onDismiss,
+                        enabled = !state.isRunning,
+                    ) {
+                        Text("閉じる")
+                    }
+                }
+            }
+        }
+    }
+}
