@@ -6,4 +6,6 @@ import kotlinx.serialization.Serializable
 data class Settings(
     val projectRootPath: String? = null,
     val workingDirectoryByScriptId: Map<String, String> = emptyMap(),
+    /** null または空: 全カテゴリ表示。非空: 列挙した第1階層名のスクリプトだけ表示 */
+    val visibleScriptCategories: List<String>? = null,
 )

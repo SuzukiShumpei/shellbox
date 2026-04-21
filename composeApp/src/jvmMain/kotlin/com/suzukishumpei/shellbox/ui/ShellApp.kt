@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,10 +18,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -88,7 +91,10 @@ fun ShellApp(vm: ShellViewModel, parentWindow: Window?) {
                 actions = {
                     if (settings.projectRootPath != null) {
                         TextButton(onClick = { vm.refreshScan() }) {
-                            Text("再取得")
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "スクリプト一覧を再読み込み",
+                            )
                         }
                     }
                 },
@@ -139,9 +145,27 @@ fun ShellApp(vm: ShellViewModel, parentWindow: Window?) {
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                         }
+                        val scriptsAfterCategory =
+                            remember(scripts, settings.visibleScriptCategories) {
+                                val f = settings.visibleScriptCategories
+                                if (f.isNullOrEmpty()) {
+                                    scripts
+                                } else {
+                                    val allow = f.toSet()
+                                    scripts.filter { it.category in allow }
+                                }
+                            }
+                        val allCategories = remember(scripts) {
+                            scripts.map { it.category }.distinct().sorted()
+                        }
                         ScriptListScreen(
-                            scripts = scripts,
+                            projectHasScripts = scripts.isNotEmpty(),
+                            scripts = scriptsAfterCategory,
+                            allCategories = allCategories,
+                            visibleCategoryFilter = settings.visibleScriptCategories,
                             cwdById = settings.workingDirectoryByScriptId,
+                            onToggleCategory = { vm.toggleVisibleScriptCategory(it) },
+                            onClearCategoryFilter = { vm.clearVisibleScriptCategoryFilter() },
                             onDetail = { vm.navigateToDetail(it) },
                             onRun = { vm.runScript(it, pick) },
                             onPickCwd = { id ->
@@ -205,17 +229,28 @@ private fun ProjectRootEmpty(onChoose: () -> Unit) {
 
 @Composable
 private fun ScriptListScreen(
+    projectHasScripts: Boolean,
     scripts: List<ScriptEntry>,
+    allCategories: List<String>,
+    visibleCategoryFilter: List<String>?,
     cwdById: Map<String, String>,
+    onToggleCategory: (String) -> Unit,
+    onClearCategoryFilter: () -> Unit,
     onDetail: (ScriptEntry) -> Unit,
     onRun: (ScriptEntry) -> Unit,
     onPickCwd: (String) -> Unit,
     onUseProjectRoot: (String) -> Unit,
 ) {
-    if (scripts.isEmpty()) {
-        Text("スクリプトがありません。scripts/ 配下にディレクトリを作成してください。")
+    if (!projectHasScripts) {
+        Text(
+            text = "スクリプトがありません。`scripts/<カテゴリ>/<スクリプトID>/README.md` のように、" +
+                    "scripts 直下にカテゴリフォルダを置き、その下にスクリプトIDディレクトリを置いてください。" +
+                    "（`scripts/foo/` のように直下だけの配置は除外されます）",
+            style = MaterialTheme.typography.bodyMedium,
+        )
         return
     }
+    val categoryScroll = rememberScrollState()
     var searchQuery by remember { mutableStateOf("") }
     val filteredScripts = remember(scripts, searchQuery) {
         val q = searchQuery.trim().lowercase()
@@ -228,111 +263,150 @@ private fun ScriptListScreen(
             }
         }
     }
+    val filterSet = visibleCategoryFilter?.toSet()
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall,
-                placeholder = {
-                    Text(
-                        text = "スクリプトID・READMEで検索",
-                        style = MaterialTheme.typography.bodySmall,
+        if (allCategories.isNotEmpty()) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                val allOn = filterSet == null
+                FilterChip(
+                    selected = allOn,
+                    onClick = onClearCategoryFilter,
+                    label = { Text("すべて", style = MaterialTheme.typography.labelMedium) },
+                )
+                allCategories.forEach { cat ->
+                    val selected = filterSet == null || cat in filterSet
+                    FilterChip(
+                        selected = selected,
+                        onClick = { onToggleCategory(cat) },
+                        label = { Text(cat, style = MaterialTheme.typography.labelMedium) },
                     )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                    )
-                },
-            )
-            if (searchQuery.isNotEmpty()) {
-                TextButton(
-                    onClick = { searchQuery = "" },
-                    modifier = Modifier.heightIn(max = 52.dp),
-                ) {
-                    Text("消去", style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
-        Spacer(modifier = Modifier.height(6.dp))
-        if (filteredScripts.isEmpty()) {
+        if (scripts.isEmpty()) {
             Text(
-                text = "一致するスクリプトがありません。",
+                text = "カテゴリの絞り込みで表示中のスクリプトが 0 件です。チップを調整してください。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                items(filteredScripts, key = { it.id }) { entry ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(text = entry.title, style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                text = "ID: ${entry.id}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            cwdById[entry.id]?.let { cwd ->
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    placeholder = {
+                        Text(
+                            text = "スクリプトID・READMEで検索",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                        )
+                    },
+                )
+                if (searchQuery.isNotEmpty()) {
+                    TextButton(
+                        onClick = { searchQuery = "" },
+                        modifier = Modifier.heightIn(max = 52.dp),
+                    ) {
+                        Text("消去", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            if (filteredScripts.isEmpty()) {
+                Text(
+                    text = "一致するスクリプトがありません。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                ) {
+                    items(filteredScripts, key = { it.id }) { entry ->
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    text = "実行 path: $cwd",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace,
+                                    text = entry.title,
+                                    style = MaterialTheme.typography.titleMedium
                                 )
-                            } ?: Text(
-                                text = "実行 path: 未設定（実行時に選択）",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                OutlinedButton(
-                                    onClick = { onUseProjectRoot(entry.id) },
-                                ) {
+                                Text(
+                                    text = "カテゴリ: ${entry.category}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    text = "ID: ${entry.id}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                cwdById[entry.id]?.let { cwd ->
                                     Text(
-                                        text = "実行 path 指定なし",
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
+                                        text = "実行 path: $cwd",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = FontFamily.Monospace,
                                     )
-                                }
-                                OutlinedButton(
-                                    onClick = { onPickCwd(entry.id) },
+                                } ?: Text(
+                                    text = "実行 path: 未設定（実行時に選択）",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Text(
-                                        text = "実行 path を選択",
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                OutlinedButton(
-                                    onClick = { onDetail(entry) },
-                                ) {
-                                    Text(
-                                        text = "詳細",
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                Button(
-                                    onClick = { onRun(entry) },
-                                ) {
-                                    Text(
-                                        text = "実行",
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                                    OutlinedButton(
+                                        onClick = { onUseProjectRoot(entry.id) },
+                                    ) {
+                                        Text(
+                                            text = "実行 path 指定なし",
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onPickCwd(entry.id) },
+                                    ) {
+                                        Text(
+                                            text = "実行 path を選択",
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onDetail(entry) },
+                                    ) {
+                                        Text(
+                                            text = "詳細",
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    Button(
+                                        onClick = { onRun(entry) },
+                                    ) {
+                                        Text(
+                                            text = "実行",
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -362,14 +436,19 @@ private fun DetailScreen(
             Text(entry.title, style = MaterialTheme.typography.titleLarge)
         }
         Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "カテゴリ: ${entry.category}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
         cwd?.let {
             Text(
-                "実行 path: $it",
+                text = "実行 path: $it",
                 fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.bodySmall
+                style = MaterialTheme.typography.bodySmall,
             )
         } ?: Text(
-            "実行 path: 未設定",
+            text = "実行 path: 未設定",
             color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.bodySmall,
         )

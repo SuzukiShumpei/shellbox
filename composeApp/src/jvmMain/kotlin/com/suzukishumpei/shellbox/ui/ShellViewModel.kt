@@ -64,10 +64,45 @@ class ShellViewModel(
     }
 
     fun setProjectRoot(path: String) {
-        _settings.update { it.copy(projectRootPath = path) }
+        _settings.update {
+            it.copy(
+                projectRootPath = path,
+                visibleScriptCategories = null,
+            )
+        }
         persist()
         refreshScan()
         restartScriptsDirectoryWatcher()
+    }
+
+    /** null = 全カテゴリ表示。非 null = 含めるカテゴリのみ（第1階層名）。 */
+    fun clearVisibleScriptCategoryFilter() {
+        _settings.update { it.copy(visibleScriptCategories = null) }
+        persist()
+    }
+
+    /**
+     * フィルタ未設定時の初回クリック: そのカテゴリを除外。
+     * フィルタ設定済み: カテゴリのオンオフ。結果が全件または空なら null に戻す。
+     */
+    fun toggleVisibleScriptCategory(category: String) {
+        val all = _scripts.value.map { it.category }.toSet()
+        if (all.isEmpty()) return
+        val cur = _settings.value.visibleScriptCategories?.toSet()
+        val next = if (cur == null) {
+            all - category
+        } else {
+            val m = cur.toMutableSet()
+            if (category in m) m.remove(category) else m.add(category)
+            m
+        }
+        val normalized = when {
+            next.isEmpty() -> null
+            next == all -> null
+            else -> next.toList().sorted()
+        }
+        _settings.update { it.copy(visibleScriptCategories = normalized) }
+        persist()
     }
 
     fun setWorkingDirectoryForScript(scriptId: String, path: String) {
@@ -105,8 +140,20 @@ class ShellViewModel(
         val projectPath = Path(root)
         scanner.scan(projectPath).fold(
             onSuccess = { list ->
+                val allCats = list.map { it.category }.toSet()
+                _settings.update { s ->
+                    val f = s.visibleScriptCategories ?: return@update s
+                    val pruned = f.filter { it in allCats }
+                    when {
+                        pruned.isEmpty() || pruned.toSet() == allCats ->
+                            s.copy(visibleScriptCategories = null)
+                        else ->
+                            s.copy(visibleScriptCategories = pruned.sorted())
+                    }
+                }
                 _scripts.value = list
                 _scanError.value = null
+                persist()
                 ensureScriptsDirectoryWatcher()
             },
             onFailure = { e ->

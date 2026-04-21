@@ -1,5 +1,6 @@
 package com.suzukishumpei.shellbox.domain
 
+import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
@@ -7,7 +8,12 @@ import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.name
 import kotlin.io.path.notExists
+import kotlin.streams.toList
 
+/**
+ * `scripts/<カテゴリ>/<…>/` の形のみ採用する。
+ * `scripts/<スクリプトID>/` のように直下にスクリプトだけ置いた構成は一覧に出さない。
+ */
 class ScriptScanner {
 
     fun scan(projectRoot: Path): Result<List<ScriptEntry>> {
@@ -17,33 +23,45 @@ class ScriptScanner {
                 IllegalStateException("scripts ディレクトリが見つかりません: $scriptsDir"),
             )
         }
-        val dirs = Files.list(scriptsDir).use { stream ->
+        val categoryDirs = Files.list(scriptsDir).use { stream ->
             stream.toList()
                 .filter { it.isDirectory(LinkOption.NOFOLLOW_LINKS) }
                 .filter { !it.name.startsWith(".") }
                 .sortedBy { it.name }
         }
-        val entries = dirs.mapNotNull { dir -> scanScriptDir(dir) }
-        return Result.success(entries)
-    }
-
-    private fun scanScriptDir(dir: Path): ScriptEntry? {
-        val id = dir.name
-        val readme = dir.resolve("README.md")
-        val readmeText = if (readme.isRegularFile()) {
-            Files.readString(readme, Charsets.UTF_8)
-        } else {
-            ""
+        val entries = mutableListOf<ScriptEntry>()
+        for (categoryPath in categoryDirs) {
+            Files.walk(categoryPath).use { stream ->
+                stream.toList()
+                    .filter { it.isDirectory(LinkOption.NOFOLLOW_LINKS) }
+                    .filter { path ->
+                        val rel = scriptsDir.relativize(path)
+                        rel.nameCount >= 2
+                    }
+                    .sorted()
+                    .forEach { dir ->
+                        val readme = dir.resolve("README.md")
+                        if (!readme.isRegularFile()) return@forEach
+                        val rel = scriptsDir.relativize(dir)
+                        val id = rel.toString().replace(File.separatorChar, '/')
+                        val category = rel.getName(0).toString()
+                        val readmeText = Files.readString(readme, Charsets.UTF_8)
+                        val title = readmeTitleFromContent(readmeText, id)
+                        val scriptPath = resolveScriptFile(dir)
+                        entries.add(
+                            ScriptEntry(
+                                id = id,
+                                category = category,
+                                title = title,
+                                readmePath = readme,
+                                readmeFullText = readmeText,
+                                scriptPath = scriptPath,
+                            ),
+                        )
+                    }
+            }
         }
-        val title = readmeTitleFromContent(readmeText, id)
-        val scriptPath = resolveScriptFile(dir)
-        return ScriptEntry(
-            id = id,
-            title = title,
-            readmePath = readme,
-            readmeFullText = readmeText,
-            scriptPath = scriptPath,
-        )
+        return Result.success(entries.distinctBy { it.id }.sortedBy { it.id })
     }
 
     private fun resolveScriptFile(dir: Path): Path? {
