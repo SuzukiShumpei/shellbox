@@ -2,8 +2,10 @@ package com.suzukishumpei.shellbox.ui
 
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -370,13 +372,10 @@ private fun ScriptListScreen(
                 )
             } else {
                 val listState = rememberLazyListState()
-                Row(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    verticalAlignment = Alignment.Top,
-                ) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
@@ -454,7 +453,10 @@ private fun ScriptListScreen(
                         }
                     }
                     VerticalScrollbar(
-                        modifier = Modifier.fillMaxHeight(),
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .offset(x = 16.dp),
                         adapter = rememberScrollbarAdapter(listState),
                     )
                 }
