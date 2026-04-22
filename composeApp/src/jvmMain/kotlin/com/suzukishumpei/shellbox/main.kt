@@ -19,6 +19,8 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberTrayState
 import androidx.compose.ui.window.rememberWindowState
 import com.suzukishumpei.shellbox.ui.App
+import javax.swing.SwingUtilities
+import kotlinx.coroutines.delay
 
 /** メニューバー向けの明るいトーン（Material ベクタの黒塗りをトレイに使わず、再帰も起こさない）。 */
 private val TrayIconFill = Color(0xFFF2F2F7)
@@ -87,8 +89,17 @@ fun main() = application {
             state = windowState,
             title = "Shell Box",
         ) {
+            // トレイ等から再表示のたびに前面へ（マッピング後・EDT で toFront）
             LaunchedEffect(Unit) {
-                window.toFront()
+                delay(32)
+                val w = window
+                SwingUtilities.invokeLater {
+                    val prev = w.isAlwaysOnTop
+                    w.isAlwaysOnTop = true
+                    w.toFront()
+                    w.requestFocus()
+                    w.isAlwaysOnTop = prev
+                }
             }
             App(window)
         }
