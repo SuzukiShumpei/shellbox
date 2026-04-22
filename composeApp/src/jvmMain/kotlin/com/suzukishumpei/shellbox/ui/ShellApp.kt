@@ -3,6 +3,7 @@ package com.suzukishumpei.shellbox.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -108,7 +109,7 @@ fun ShellApp(vm: ShellViewModel, parentWindow: Window?) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp),
+                .padding(horizontal = 16.dp),
         ) {
             when (val r = route) {
                 ShellRoute.List -> {
@@ -120,26 +121,18 @@ fun ShellApp(vm: ShellViewModel, parentWindow: Window?) {
                             }
                         })
                     } else {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            itemVerticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = "プロジェクト: ${settings.projectRootPath}",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            TextButton(
-                                onClick = {
-                                    scope.launch {
-                                        val p = pick()
-                                        if (p != null) vm.setProjectRoot(p)
-                                    }
-                                },
-                            ) {
-                                Text("プロジェクト変更")
+                        val projectRoot = checkNotNull(settings.projectRootPath)
+                        val changeProject: () -> Unit = {
+                            scope.launch {
+                                val p = pick()
+                                if (p != null) vm.setProjectRoot(p)
                             }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
+                        CompactProjectRootRow(
+                            projectRootPath = projectRoot,
+                            onChangeProject = changeProject,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
                         scanError?.let { err ->
                             Text(
                                 text = err,
@@ -210,6 +203,42 @@ fun ShellApp(vm: ShellViewModel, parentWindow: Window?) {
             onStop = { vm.stopRun() },
             onSendStdin = { vm.sendStdinLine(it) },
         )
+    }
+}
+
+@Composable
+private fun CompactProjectRootRow(
+    projectRootPath: String,
+    onChangeProject: () -> Unit,
+) {
+    val secondary = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 36.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "プロジェクト",
+            style = MaterialTheme.typography.labelSmall,
+            color = secondary,
+        )
+        Text(
+            text = projectRootPath,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = secondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(
+            onClick = onChangeProject,
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+        ) {
+            Text("変更", style = MaterialTheme.typography.labelSmall)
+        }
     }
 }
 
@@ -338,8 +367,9 @@ private fun ScriptListScreen(
                 )
             } else {
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(filteredScripts, key = { it.id }) { entry ->
                         Card(modifier = Modifier.fillMaxWidth()) {
@@ -500,7 +530,9 @@ private fun RunDialog(
                 .fillMaxWidth(0.94f)
                 .fillMaxHeight(0.90f),
         ) {
-            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp).fillMaxSize()) {
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp).fillMaxSize()
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
