@@ -63,6 +63,7 @@ private object ShellBoxTrayIconPainter : Painter() {
 
 fun main() = application {
     var isWindowVisible by remember { mutableStateOf(true) }
+    var bringToFrontRequest by remember { mutableStateOf(0L) }
     val trayState = rememberTrayState()
     val trayIcon = remember { ShellBoxTrayIconPainter }
 
@@ -72,10 +73,22 @@ fun main() = application {
         tooltip = "Shell Box",
         menu = {
             Item(
-                text = if (isWindowVisible) "ウィンドウを隠す" else "Shell Box を表示",
-                onClick = { isWindowVisible = !isWindowVisible },
+                text = "Shell Box を表示",
+                onClick = {
+                    isWindowVisible = true
+                    bringToFrontRequest++
+                },
             )
-            Item("終了", onClick = ::exitApplication)
+            if (isWindowVisible) {
+                Item(
+                    text = "Shell Box を非表示",
+                    onClick = { isWindowVisible = false },
+                )
+            }
+            Item(
+                text = "終了",
+                onClick = ::exitApplication,
+            )
         },
     )
 
@@ -89,8 +102,8 @@ fun main() = application {
             state = windowState,
             title = "Shell Box",
         ) {
-            // トレイ等から再表示のたびに前面へ（マッピング後・EDT で toFront）
-            LaunchedEffect(Unit) {
+            // 表示メニュー押下ごとに前面化。既に表示中(true)でも request が増えて再実行される。
+            LaunchedEffect(bringToFrontRequest) {
                 delay(32)
                 val w = window
                 SwingUtilities.invokeLater {
