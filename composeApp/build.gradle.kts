@@ -37,12 +37,21 @@ compose.desktop {
     application {
         mainClass = "com.suzukishumpei.shellbox.MainKt"
 
+        // メニューバー常駐に近い挙動: macOS で Dock アイコンを出さない（配布以外の ./gradlew run でも有効）
+        jvmArgs += listOf("-Dapple.awt.UIElement=true")
+
         nativeDistributions {
             targetFormats(TargetFormat.Dmg)
             packageName = "Shell Box"
             packageVersion = "1.0.0"
             macOS {
                 bundleID = "com.suzukishumpei.shellbox"
+                infoPlist {
+                    extraKeysRawXml = """
+                        <key>LSUIElement</key>
+                        <string>true</string>
+                    """.trimIndent()
+                }
             }
         }
     }
