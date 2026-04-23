@@ -12,4 +12,6 @@ data class Settings(
     val importedScriptPathById: Map<String, String> = emptyMap(),
     /** null または空: 全カテゴリ表示。非空: 列挙した第1階層名のスクリプトだけ表示 */
     val visibleScriptCategories: List<String>? = null,
+    /** トレイ「頻出」用。スクリプト ID ごとの実行回数（起動成功のたびに加算）。 */
+    val runCountsByScriptId: Map<String, Int> = emptyMap(),
 )

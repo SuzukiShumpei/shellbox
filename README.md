@@ -5,9 +5,16 @@
 ## 使い方
 
 1. shellbox repositoryをcloneする。
-2. release noteから最新のDMGファイルをダウンロードし、インストールする。
+2. [Releases](https://github.com/SuzukiShumpei/shellbox/releases) から最新のDMGファイルをダウンロードし、インストールする。
 3. Shell Boxを起動し、cloneしたrepositoryのpathを指定する。
-4. 3によって`shellbox/scripts`にあるスクリプトが一覧に表示・実行できるようになる。
+4. 3によって`shellbox/カテゴリー/scripts`にあるスクリプトが一覧に表示・実行できるようになる。
+
+Shell Boxを起動すると上部メニューにアイコンが追加され、アイコンをクリックすると以下のメニューが表示されます。
+
+- アプリWindowを最上位に表示
+- アプリWindowを非表示（アプリは起動継続）
+- 実行スクリプト履歴の高頻度5件（クリックすると実行されるショートカット機能）
+- Shell Boxの終了
 
 ## スクリプトの追加方法
 

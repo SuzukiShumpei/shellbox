@@ -231,6 +231,7 @@ class ShellViewModel(
                     val base = s.copy(
                         workingDirectoryByScriptId = s.workingDirectoryByScriptId.filterKeys { it in validIds },
                         importedScriptPathById = s.importedScriptPathById.filterKeys { it in validIds },
+                        runCountsByScriptId = s.runCountsByScriptId.filterKeys { it in validIds },
                     )
                     val f = base.visibleScriptCategories ?: return@update base
                     val pruned = f.filter { it in allCats }
@@ -366,6 +367,7 @@ class ShellViewModel(
                 activeRunner = null
                 return@launch
             }
+            incrementRunCount(entry.id)
             val code = withContext(Dispatchers.IO) {
                 runner.waitForExit()
             }
@@ -388,6 +390,14 @@ class ShellViewModel(
     suspend fun pickAndSetWorkingDirectory(scriptId: String, pickDirectory: suspend () -> String?) {
         val path = pickDirectory() ?: return
         setWorkingDirectoryForScript(scriptId, path)
+    }
+
+    private fun incrementRunCount(scriptId: String) {
+        _settings.update { s ->
+            val next = (s.runCountsByScriptId[scriptId] ?: 0) + 1
+            s.copy(runCountsByScriptId = s.runCountsByScriptId + (scriptId to next))
+        }
+        persist()
     }
 
     private fun persist() {

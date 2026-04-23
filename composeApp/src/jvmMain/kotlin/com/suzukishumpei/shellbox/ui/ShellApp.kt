@@ -81,11 +81,11 @@ import java.awt.Window
 fun App(
     parentWindow: Window?,
     onExitApplication: () -> Unit,
+    viewModel: ShellViewModel,
 ) {
     // Release DMG では ProGuard により viewModel() 経由の Factory デフォルト実装が壊れるため、
-    // Compose の viewModel() は使わず 1 ウィンドウ 1 インスタンスで保持する。
-    val vm = remember { ShellViewModel() }
-    ShellApp(vm, parentWindow, onExitApplication)
+    // Compose の viewModel() は使わず 1 ウィンドウ 1 インスタンスで保持する（[viewModel] は main で生成）。
+    ShellApp(viewModel, parentWindow, onExitApplication)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

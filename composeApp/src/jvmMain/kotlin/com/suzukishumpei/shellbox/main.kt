@@ -1,9 +1,13 @@
 package com.suzukishumpei.shellbox
 
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -18,9 +22,13 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberTrayState
 import androidx.compose.ui.window.rememberWindowState
+import com.suzukishumpei.shellbox.domain.ScriptEntry
 import com.suzukishumpei.shellbox.ui.App
+import com.suzukishumpei.shellbox.ui.ShellViewModel
+import com.suzukishumpei.shellbox.ui.pickDirectory
 import javax.swing.SwingUtilities
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** メニューバー向けの明るいトーン（Material ベクタの黒塗りをトレイに使わず、再帰も起こさない）。 */
 private val TrayIconFill = Color(0xFFF2F2F7)
@@ -61,11 +69,46 @@ private object ShellBoxTrayIconPainter : Painter() {
     }
 }
 
+private const val TrayFrequentTitleMaxLen = 48
+
+private fun trayMenuTitleForScript(title: String): String {
+    val t = title.trim().ifEmpty { "（無題）" }
+    if (t.length <= TrayFrequentTitleMaxLen) return t
+    return t.take(TrayFrequentTitleMaxLen - 1) + "…"
+}
+
+/** 実行回数の多い順（同数はタイトル順）。現在のスキャン結果に存在する ID のみ。 */
+private fun trayFrequentFive(
+    counts: Map<String, Int>,
+    scripts: List<ScriptEntry>,
+): List<Pair<String, String>> {
+    if (counts.isEmpty() || scripts.isEmpty()) return emptyList()
+    val titleById = scripts.associate { it.id to it.title }
+    return counts.entries
+        .asSequence()
+        .filter { it.key in titleById && it.value > 0 }
+        .sortedWith(
+            compareByDescending<Map.Entry<String, Int>> { it.value }
+                .thenBy { titleById[it.key] ?: "" },
+        )
+        .take(5)
+        .map { it.key to trayMenuTitleForScript(titleById.getValue(it.key)) }
+        .toList()
+}
+
 fun main() = application {
+    val vm = remember { ShellViewModel() }
+    val settings by vm.settings.collectAsState()
+    val scripts by vm.scripts.collectAsState()
+    val scope = rememberCoroutineScope()
     var isWindowVisible by remember { mutableStateOf(true) }
     var bringToFrontRequest by remember { mutableStateOf(0L) }
+    var awtWindowForPicker by remember { mutableStateOf<java.awt.Window?>(null) }
     val trayState = rememberTrayState()
     val trayIcon = remember { ShellBoxTrayIconPainter }
+    val frequentTrayEntries = remember(settings.runCountsByScriptId, scripts) {
+        trayFrequentFive(settings.runCountsByScriptId, scripts)
+    }
 
     Tray(
         state = trayState,
@@ -85,6 +128,21 @@ fun main() = application {
                     onClick = { isWindowVisible = false },
                 )
             }
+            frequentTrayEntries.forEach { (scriptId, menuTitle) ->
+                Item(
+                    text = "🤖 $menuTitle",
+                    onClick = {
+                        isWindowVisible = true
+                        bringToFrontRequest++
+                        scope.launch {
+                            delay(120)
+                            val w = awtWindowForPicker
+                            val entry = vm.scripts.value.find { it.id == scriptId } ?: return@launch
+                            vm.runScript(entry) { pickDirectory(w) }
+                        }
+                    },
+                )
+            }
             Item(
                 text = "終了",
                 onClick = ::exitApplication,
@@ -102,6 +160,14 @@ fun main() = application {
             state = windowState,
             title = "Shell Box",
         ) {
+            SideEffect {
+                awtWindowForPicker = window
+            }
+            DisposableEffect(Unit) {
+                onDispose {
+                    awtWindowForPicker = null
+                }
+            }
             // 表示メニュー押下ごとに前面化。既に表示中(true)でも request が増えて再実行される。
             LaunchedEffect(bringToFrontRequest) {
                 delay(32)
@@ -117,6 +183,7 @@ fun main() = application {
             App(
                 parentWindow = window,
                 onExitApplication = { exitApplication() },
+                viewModel = vm,
             )
         }
     }
