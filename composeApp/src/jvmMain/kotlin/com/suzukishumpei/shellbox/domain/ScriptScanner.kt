@@ -47,7 +47,12 @@ class ScriptScanner {
                         val category = rel.getName(0).toString()
                         val readmeText = Files.readString(readme, Charsets.UTF_8)
                         val title = readmeTitleFromContent(readmeText, id)
+                        val isImport = (category == "import")
                         val scriptPath = resolveScriptFile(dir)
+                        if (scriptPath == null && !isImport) {
+                            // import 以外は README だけのディレクトリは採用しない
+                            return@forEach
+                        }
                         entries.add(
                             ScriptEntry(
                                 id = id,
@@ -56,6 +61,7 @@ class ScriptScanner {
                                 readmePath = readme,
                                 readmeFullText = readmeText,
                                 scriptPath = scriptPath,
+                                isImported = isImport,
                             ),
                         )
                     }

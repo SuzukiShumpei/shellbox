@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,6 +37,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -86,6 +89,10 @@ fun ShellApp(vm: ShellViewModel, parentWindow: Window?) {
     val pick: suspend () -> String? = remember(parentWindow) {
         { pickDirectory(parentWindow) }
     }
+    val pickScript: suspend () -> String? = remember(parentWindow) {
+        { pickScriptFile(parentWindow) }
+    }
+    var showImportDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -165,8 +172,10 @@ fun ShellApp(vm: ShellViewModel, parentWindow: Window?) {
                             allCategories = allCategories,
                             visibleCategoryFilter = settings.visibleScriptCategories,
                             cwdById = settings.workingDirectoryByScriptId,
+                            importedPathById = settings.importedScriptPathById,
                             onToggleCategory = { vm.toggleVisibleScriptCategory(it) },
                             onClearCategoryFilter = { vm.clearVisibleScriptCategoryFilter() },
+                            onRequestImport = { showImportDialog = true },
                             onDetail = { vm.navigateToDetail(it) },
                             onRun = { vm.runScript(it, pick) },
                             onPickCwd = { id ->
@@ -185,6 +194,7 @@ fun ShellApp(vm: ShellViewModel, parentWindow: Window?) {
                     DetailScreen(
                         entry = r.entry,
                         cwd = settings.workingDirectoryByScriptId[r.entry.id],
+                        importedPath = settings.importedScriptPathById[r.entry.id],
                         onBack = { vm.navigateToList() },
                         onRun = { vm.runScript(r.entry, pick) },
                         onPickCwd = {
@@ -195,10 +205,30 @@ fun ShellApp(vm: ShellViewModel, parentWindow: Window?) {
                         onUseProjectRoot = {
                             vm.useProjectRootAsWorkingDirectory(r.entry.id)
                         },
+                        onPickImportScript = {
+                            scope.launch {
+                                val f = pickScript() ?: return@launch
+                                vm.setImportedScriptPath(r.entry.id, f)
+                            }
+                        },
+                        onClearImportScript = {
+                            vm.clearImportedScriptPath(r.entry.id)
+                        },
                     )
                 }
             }
         }
+    }
+
+    if (showImportDialog) {
+        ImportScriptDialog(
+            onDismiss = { showImportDialog = false },
+            onRegister = { segment, file, title, cwdOpt ->
+                vm.registerImportedScript(segment, file, title, cwdOpt).exceptionOrNull()?.message
+            },
+            pickFile = pickScript,
+            pickCwd = pick,
+        )
     }
 
     runDialog?.let { state ->
@@ -271,8 +301,10 @@ private fun ScriptListScreen(
     allCategories: List<String>,
     visibleCategoryFilter: List<String>?,
     cwdById: Map<String, String>,
+    importedPathById: Map<String, String>,
     onToggleCategory: (String) -> Unit,
     onClearCategoryFilter: () -> Unit,
+    onRequestImport: () -> Unit,
     onDetail: (ScriptEntry) -> Unit,
     onRun: (ScriptEntry) -> Unit,
     onPickCwd: (String) -> Unit,
@@ -288,13 +320,15 @@ private fun ScriptListScreen(
         return
     }
     var searchQuery by remember { mutableStateOf("") }
-    val filteredScripts = remember(scripts, searchQuery) {
+    val filteredScripts = remember(scripts, searchQuery, importedPathById) {
         val q = searchQuery.trim().lowercase()
         if (q.isEmpty()) {
             scripts
         } else {
             scripts.filter { entry ->
-                entry.id.lowercase().contains(q) ||
+                val pathMatch = importedPathById[entry.id]?.lowercase()?.contains(q) == true
+                pathMatch ||
+                        entry.id.lowercase().contains(q) ||
                         entry.readmeFullText.lowercase().contains(q)
             }
         }
@@ -320,6 +354,10 @@ private fun ScriptListScreen(
                         onClick = { onToggleCategory(cat) },
                         label = { Text(cat, style = MaterialTheme.typography.labelMedium) },
                     )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                OutlinedButton(onClick = onRequestImport) {
+                    Text("外部スクリプトを登録", style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
@@ -382,10 +420,27 @@ private fun ScriptListScreen(
                         items(filteredScripts, key = { it.id }) { entry ->
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp)) {
-                                    Text(
-                                        text = entry.title,
-                                        style = MaterialTheme.typography.titleMedium,
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Text(
+                                            text = entry.title,
+                                            style = MaterialTheme.typography.titleMedium,
+                                        )
+                                        if (entry.isImported) {
+                                            SuggestionChip(
+                                                onClick = {},
+                                                label = {
+                                                    Text(
+                                                        text = "外部",
+                                                        style = MaterialTheme.typography.labelSmall
+                                                    )
+                                                },
+                                                enabled = true,
+                                            )
+                                        }
+                                    }
                                     Text(
                                         text = "カテゴリ: ${entry.category}",
                                         style = MaterialTheme.typography.labelSmall,
@@ -396,6 +451,23 @@ private fun ScriptListScreen(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                    if (entry.isImported) {
+                                        val ext = importedPathById[entry.id]
+                                        if (ext != null) {
+                                            Text(
+                                                text = "外部スクリプト: $ext",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "外部スクリプト: 未設定（詳細で path を指定）",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.error,
+                                            )
+                                        }
+                                    }
                                     cwdById[entry.id]?.let { cwd ->
                                         Text(
                                             text = "実行 path: $cwd",
@@ -469,10 +541,13 @@ private fun ScriptListScreen(
 private fun DetailScreen(
     entry: ScriptEntry,
     cwd: String?,
+    importedPath: String?,
     onBack: () -> Unit,
     onRun: () -> Unit,
     onPickCwd: () -> Unit,
     onUseProjectRoot: () -> Unit,
+    onPickImportScript: () -> Unit,
+    onClearImportScript: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -489,6 +564,26 @@ private fun DetailScreen(
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
         )
+        if (entry.isImported) {
+            Spacer(modifier = Modifier.height(4.dp))
+            if (importedPath != null) {
+                Text(
+                    text = "外部スクリプト path: $importedPath",
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                Text(
+                    text = "外部スクリプト path: 未設定",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onPickImportScript) { Text("外部スクリプト path を選択") }
+                OutlinedButton(onClick = onClearImportScript) { Text("クリア") }
+            }
+        }
         cwd?.let {
             Text(
                 text = "実行 path: $it",
@@ -517,6 +612,116 @@ private fun DetailScreen(
             )
         }
     }
+}
+
+@Composable
+private fun ImportScriptDialog(
+    onDismiss: () -> Unit,
+    onRegister: (String, String, String, String?) -> String?,
+    pickFile: suspend () -> String?,
+    pickCwd: suspend () -> String?,
+) {
+    var segment by remember { mutableStateOf("") }
+    var title by remember { mutableStateOf("") }
+    var filePath by remember { mutableStateOf("") }
+    var cwd by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("外部スクリプトを登録") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = segment,
+                    onValueChange = { segment = it; error = null },
+                    label = { Text("スクリプトID（例: my-script-1）") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it; error = null },
+                    label = { Text("スクリプト表示タイトル") },
+                    singleLine = true,
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        filePath.ifBlank { "（スクリプト未選択）" },
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                val f = pickFile() ?: return@launch
+                                filePath = f
+                                error = null
+                            }
+                        },
+                    ) { Text("ファイル選択") }
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        if (cwd.isNullOrBlank()) "実行 path:（任意・未指定）" else "実行 path: $cwd",
+                        modifier = Modifier.weight(1f),
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                val d = pickCwd() ?: return@launch
+                                cwd = d
+                                error = null
+                            }
+                        },
+                    ) { Text("フォルダ選択") }
+                    TextButton(
+                        onClick = { cwd = null; error = null },
+                        enabled = cwd != null,
+                    ) { Text("クリア") }
+                }
+                error?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (segment.isBlank()) {
+                        error = "スクリプトID を入力してください"
+                        return@TextButton
+                    }
+                    if (filePath.isBlank()) {
+                        error = "スクリプトファイルを選択してください"
+                        return@TextButton
+                    }
+                    val err = onRegister(segment, filePath, title, cwd)
+                    if (err == null) {
+                        onDismiss()
+                    } else {
+                        error = err
+                    }
+                },
+            ) { Text("登録") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } },
+    )
 }
 
 private const val RunDialogAutoDismissMs = 700L

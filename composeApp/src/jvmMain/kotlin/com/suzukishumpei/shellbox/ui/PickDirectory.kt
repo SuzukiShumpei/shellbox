@@ -67,3 +67,53 @@ private fun pickDirectorySwingChooser(parent: Window?): String? {
         else -> null
     }
 }
+
+/**
+ * `.sh` / `.command` 等のスクリプトファイルを1つ選ぶ。macOS は [FileDialog]、それ以外は [JFileChooser]。
+ */
+suspend fun pickScriptFile(
+    parent: Window?,
+    title: String = "スクリプトを選択",
+): String? = suspendCancellableCoroutine { cont ->
+    SwingUtilities.invokeLater {
+        if (!cont.isActive) return@invokeLater
+        val path = try {
+            if (isMacOs()) {
+                pickFileMacNative(parent, title)
+            } else {
+                pickFileSwingChooser(parent, title)
+            }
+        } catch (_: Exception) {
+            null
+        }
+        cont.resume(path)
+    }
+}
+
+private fun pickFileMacNative(parent: Window?, title: String): String? {
+    val frame = parent as? Frame
+    return try {
+        val dialog = FileDialog(frame, title, FileDialog.LOAD)
+        dialog.isMultipleMode = false
+        dialog.isVisible = true
+        val directory = dialog.directory
+        val name = dialog.file
+        if (directory == null || name.isNullOrEmpty()) {
+            null
+        } else {
+            File(directory, name).canonicalFile.absolutePath
+        }
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private fun pickFileSwingChooser(parent: Window?, title: String): String? {
+    val chooser = JFileChooser()
+    chooser.fileSelectionMode = JFileChooser.FILES_ONLY
+    chooser.dialogTitle = title
+    return when (chooser.showOpenDialog(parent)) {
+        JFileChooser.APPROVE_OPTION -> chooser.selectedFile?.absolutePath
+        else -> null
+    }
+}

@@ -19,7 +19,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.nio.file.Files
+import java.nio.charset.StandardCharsets
+import java.nio.file.Path as NioPath
 import kotlin.io.path.Path
+import kotlin.io.path.isRegularFile
 
 sealed interface ShellRoute {
     data object List : ShellRoute
@@ -38,6 +42,8 @@ class ShellViewModel(
     private val settingsStore: SettingsStore = SettingsStore(),
     private val scanner: ScriptScanner = ScriptScanner(),
 ) : ViewModel() {
+
+    private val importIdSegmentRegex = Regex("""^[a-zA-Z0-9][a-zA-Z0-9._-]*$""")
 
     private val _settings = MutableStateFlow(settingsStore.load())
     val settings: StateFlow<Settings> = _settings.asStateFlow()
@@ -112,6 +118,85 @@ class ShellViewModel(
         persist()
     }
 
+    fun setImportedScriptPath(scriptId: String, path: String) {
+        _settings.update {
+            it.copy(importedScriptPathById = it.importedScriptPathById + (scriptId to path))
+        }
+        persist()
+    }
+
+    fun clearImportedScriptPath(scriptId: String) {
+        _settings.update { s ->
+            s.copy(
+                importedScriptPathById = s.importedScriptPathById.filterKeys { it != scriptId },
+            )
+        }
+        persist()
+    }
+
+    /**
+     * `scripts/import/<idSegment>/README.md` を作成し、外部スクリプト path（と任意で cwd）を登録する。
+     * 成功なら [Result.success]，失敗メッセージは [Result.failure]。
+     */
+    fun registerImportedScript(
+        idSegment: String,
+        externalScriptPath: String,
+        title: String,
+        cwd: String?,
+    ): Result<Unit> {
+        val seg = idSegment.trim()
+        if (!importIdSegmentRegex.matches(seg)) {
+            return Result.failure(
+                IllegalArgumentException("ID は英数字・._- で、先頭は英数字にしてください。"),
+            )
+        }
+        val root = _settings.value.projectRootPath
+            ?: return Result.failure(IllegalStateException("プロジェクトを設定してください。"))
+        val id = "import/$seg"
+        if (_scripts.value.any { it.id == id }) {
+            return Result.failure(IllegalStateException("同じ ID のスクリプトが既にあります。"))
+        }
+        val file = File(externalScriptPath)
+        if (!file.isFile) {
+            return Result.failure(
+                IllegalArgumentException("指定したスクリプトがファイルとして存在しません: $externalScriptPath"),
+            )
+        }
+        val dir = Path(root).resolve("scripts").resolve("import").resolve(seg)
+        val readme = dir.resolve("README.md")
+        if (Files.isRegularFile(readme)) {
+            return Result.failure(
+                IllegalStateException(
+                    "既に scripts/import/$seg があります。手動で整理するか別の ID を使ってください。",
+                ),
+            )
+        }
+        return runCatching {
+            Files.createDirectories(dir)
+            val t = title.trim().ifEmpty { seg }
+            val body =
+                """
+                |# $t
+                |
+                |importした外部スクリプトです。スクリプトpathの指定は必須です。詳細画面から指定・変更してください。
+                """.trimMargin()
+            Files.writeString(readme, body, StandardCharsets.UTF_8)
+            _settings.update { s ->
+                var next = s.copy(
+                    importedScriptPathById = s.importedScriptPathById + (id to file.canonicalPath),
+                )
+                if (cwd != null) {
+                    next = next.copy(
+                        workingDirectoryByScriptId = next.workingDirectoryByScriptId + (id to cwd),
+                    )
+                }
+                next
+            }
+            persist()
+            refreshScan()
+        }
+    }
+
     /** cwd にこだわらないスクリプト向けに、プロジェクトルートをワンタップで設定する。 */
     fun useProjectRootAsWorkingDirectory(scriptId: String) {
         val root = _settings.value.projectRootPath ?: return
@@ -141,15 +226,20 @@ class ShellViewModel(
         scanner.scan(projectPath).fold(
             onSuccess = { list ->
                 val allCats = list.map { it.category }.toSet()
+                val validIds = list.map { it.id }.toSet()
                 _settings.update { s ->
-                    val f = s.visibleScriptCategories ?: return@update s
+                    val base = s.copy(
+                        workingDirectoryByScriptId = s.workingDirectoryByScriptId.filterKeys { it in validIds },
+                        importedScriptPathById = s.importedScriptPathById.filterKeys { it in validIds },
+                    )
+                    val f = base.visibleScriptCategories ?: return@update base
                     val pruned = f.filter { it in allCats }
                     when {
                         pruned.isEmpty() || pruned.toSet() == allCats ->
-                            s.copy(visibleScriptCategories = null)
+                            base.copy(visibleScriptCategories = null)
 
                         else ->
-                            s.copy(visibleScriptCategories = pruned.sorted())
+                            base.copy(visibleScriptCategories = pruned.sorted())
                     }
                 }
                 _scripts.value = list
@@ -217,16 +307,23 @@ class ShellViewModel(
      */
     fun runScript(entry: ScriptEntry, pickDirectory: suspend () -> String?) {
         viewModelScope.launch {
-            if (entry.scriptPath == null) {
+            val scriptFile = resolveExecutableForRun(entry)
+            if (scriptFile == null || !scriptFile.isRegularFile()) {
+                val msg = when {
+                    entry.isImported && _settings.value.importedScriptPathById[entry.id] == null &&
+                            entry.scriptPath == null ->
+                        "外部スクリプトの path を設定してください（詳細で .sh / .command を指定）。"
+
+                    entry.isImported ->
+                        "外部スクリプトの path が無効か、ファイルが見つかりません。"
+
+                    else ->
+                        "実行できる .sh / .command が見つかりません。"
+                }
                 _runDialog.value = RunDialogState(
                     scriptId = entry.id,
                     title = entry.title,
-                    logs = listOf(
-                        LogLine(
-                            LogStream.Err,
-                            "実行できる .sh / .command が見つかりません。"
-                        )
-                    ),
+                    logs = listOf(LogLine(LogStream.Err, msg)),
                     isRunning = false,
                     exitCode = null,
                 )
@@ -255,7 +352,7 @@ class ShellViewModel(
                 }
             }
             val startResult = withContext(Dispatchers.IO) {
-                runner.start(entry.scriptPath, cwdPath)
+                runner.start(scriptFile, cwdPath)
             }
             if (startResult.isFailure) {
                 val msg = startResult.exceptionOrNull()?.message ?: "起動に失敗しました"
@@ -295,5 +392,18 @@ class ShellViewModel(
 
     private fun persist() {
         settingsStore.save(_settings.value)
+    }
+
+    /**
+     * import: [Settings.importedScriptPathById] を最優先。未設定 or 無効ならプロジェクト内の [ScriptEntry.scriptPath]。
+     */
+    private fun resolveExecutableForRun(entry: ScriptEntry): NioPath? {
+        _settings.value.importedScriptPathById[entry.id]?.let { o ->
+            val p = File(o).toPath()
+            if (p.isRegularFile()) return p
+        }
+        val local = entry.scriptPath
+        if (local != null && local.isRegularFile()) return local
+        return null
     }
 }
