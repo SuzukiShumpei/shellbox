@@ -36,6 +36,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -342,6 +343,24 @@ private fun CategoryFilterChip(
 }
 
 @Composable
+private fun SearchBarToggleIconButton(
+    searchBarVisible: Boolean,
+    onToggle: () -> Unit,
+) {
+    IconButton(onClick = onToggle) {
+        Icon(
+            imageVector = Icons.Default.Search,
+            contentDescription = if (searchBarVisible) "検索欄を閉じる" else "検索欄を表示",
+            tint = if (searchBarVisible) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+        )
+    }
+}
+
+@Composable
 private fun ScriptListScreen(
     projectHasScripts: Boolean,
     scripts: List<ScriptEntry>,
@@ -367,6 +386,7 @@ private fun ScriptListScreen(
         return
     }
     var searchQuery by remember { mutableStateOf("") }
+    var searchBarVisible by remember { mutableStateOf(false) }
     val filteredScripts = remember(scripts, searchQuery, importedPathById) {
         val q = searchQuery.trim().lowercase()
         if (q.isEmpty()) {
@@ -389,6 +409,10 @@ private fun ScriptListScreen(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 itemVerticalAlignment = Alignment.CenterVertically,
             ) {
+                SearchBarToggleIconButton(
+                    searchBarVisible = searchBarVisible,
+                    onToggle = { searchBarVisible = !searchBarVisible },
+                )
                 val allOn = filterSet == null
                 CategoryFilterChip(
                     selected = allOn,
@@ -408,6 +432,16 @@ private fun ScriptListScreen(
                     Text("外部スクリプトを登録", style = MaterialTheme.typography.labelMedium)
                 }
             }
+        } else if (allCategories.isEmpty() && scripts.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SearchBarToggleIconButton(
+                    searchBarVisible = searchBarVisible,
+                    onToggle = { searchBarVisible = !searchBarVisible },
+                )
+            }
         }
         if (scripts.isEmpty()) {
             Text(
@@ -416,40 +450,38 @@ private fun ScriptListScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    placeholder = {
-                        Text(
-                            text = "スクリプトID・READMEで検索",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = null,
-                        )
-                    },
-                )
-                if (searchQuery.isNotEmpty()) {
-                    TextButton(
-                        onClick = { searchQuery = "" },
-                        modifier = Modifier.heightIn(max = 52.dp),
-                    ) {
-                        Text("消去", style = MaterialTheme.typography.labelSmall)
+            if (searchBarVisible) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        placeholder = {
+                            Text(
+                                text = "スクリプトID・README・外部 path",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        },
+                    )
+                    if (searchQuery.isNotEmpty()) {
+                        TextButton(
+                            onClick = { searchQuery = "" },
+                            modifier = Modifier.heightIn(max = 52.dp),
+                        ) {
+                            Text("消去", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
+                Spacer(modifier = Modifier.height(6.dp))
+            } else {
+                Spacer(modifier = Modifier.height(4.dp))
             }
-            Spacer(modifier = Modifier.height(6.dp))
             if (filteredScripts.isEmpty()) {
                 Text(
                     text = "一致するスクリプトがありません。",
