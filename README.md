@@ -45,28 +45,18 @@ Shell Boxを起動すると上部メニューにアイコンが追加され、�
 ### 開発環境
 
 - Android Studio
-- Kotlin Multiplatform Desktopアプリ（Windows動作未確認）
+- Kotlin Multiplatform Desktopアプリ(Mac OS向け)
 
 ### Build 方法
 
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:run
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:run
-  ```
+```shell
+./gradlew :composeApp:run
+```
 
 ### DMGファイルの生成方法
 
-- on macOS/Linux
-    ```shell
-    ./gradlew :composeApp:packageDmg
-    ```
-- on Windows
-    ```shell
-    .\gradlew.bat :composeApp:packageDmg
-    ```
+```shell
+./gradlew :composeApp:packageDmg
+```
 
 実行後、`root/composeApp/build/compose/binaries/main/dmg/`に`ShellBox.dmg`が生成されます。

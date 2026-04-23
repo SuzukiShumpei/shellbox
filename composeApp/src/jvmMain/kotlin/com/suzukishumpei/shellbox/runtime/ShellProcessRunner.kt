@@ -14,10 +14,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.isDirectory
 import kotlin.io.path.pathString
@@ -61,9 +63,89 @@ private fun applyPathEnvForGuiAppLaunch(env: MutableMap<String, String>) {
     env["PATH"] = mergePathEnv(env["PATH"], pathPrependForMacDmgApp(home))
 }
 
+private val PrintenvKeyRegex = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
+
+private fun parsePrintenvOutput(text: String): Map<String, String> {
+    val out = LinkedHashMap<String, String>()
+    for (line in text.lineSequence()) {
+        if (line.isEmpty()) continue
+        val i = line.indexOf('=')
+        if (i <= 0) continue
+        val k = line.substring(0, i)
+        if (!PrintenvKeyRegex.matches(k)) continue
+        out[k] = line.substring(i + 1)
+    }
+    return out
+}
+
+/**
+ * [SHELL] でログインシェルから環境を取り込む。Terminal.app は対話＋ログインのため `.zshrc` も読むが、
+ * **非対話**の `zsh -lc` だけでは `.zshrc` が読まれず `PATH` / `JAVA_HOME` がターミナルとずれる。
+ * まず `-lic`（ログイン＋対話）で `printenv` を実行し、失敗・空なら `-lc` にフォールバックする。
+ */
+private fun macLoginShellForSubprocess(): String {
+    val s = System.getenv("SHELL")?.trim().orEmpty()
+    if (s.isNotEmpty()) {
+        val p = Path.of(s)
+        if (Files.isExecutable(p)) {
+            val ok = s.endsWith("/zsh") || s.endsWith("zsh") ||
+                    s.endsWith("/bash") || s.endsWith("bash")
+            if (ok) return s
+        }
+    }
+    return if (Files.isExecutable(Path.of("/bin/zsh"))) {
+        "/bin/zsh"
+    } else {
+        "/bin/bash"
+    }
+}
+
+private fun captureMacLoginPrintenv(workDir: File?): Map<String, String>? {
+    val scriptBin = Path.of("/usr/bin/script")
+    if (!isMacOs() || !Files.isExecutable(scriptBin)) return null
+    val login = macLoginShellForSubprocess()
+    for (flags in listOf("-lic", "-lc")) {
+        val parsed = runMacPrintenvCapture(login, flags, workDir) ?: continue
+        if (parsed.isNotEmpty()) return parsed
+    }
+    return null
+}
+
+private fun runMacPrintenvCapture(
+    loginShell: String,
+    loginFlags: String,
+    workDir: File?,
+): Map<String, String>? =
+    try {
+        val pb = ProcessBuilder(
+            "/usr/bin/script",
+            "-q",
+            "/dev/null",
+            loginShell,
+            loginFlags,
+            "/usr/bin/printenv",
+        )
+        if (workDir != null && workDir.isDirectory) {
+            pb.directory(workDir)
+        }
+        pb.redirectError(ProcessBuilder.Redirect.to(File("/dev/null")))
+        val p = pb.start()
+        val ok = p.waitFor(28, TimeUnit.SECONDS)
+        if (!ok) {
+            p.destroyForcibly()
+            return null
+        }
+        if (p.exitValue() != 0) return null
+        val text = p.inputStream.bufferedReader(StandardCharsets.UTF_8).readText()
+        parsePrintenvOutput(text)
+    } catch (_: Exception) {
+        null
+    }
+
 /**
  * パイプ実行だと bash の `select` や `read -p` のプロンプトが stderr バッファに留まり、
  * かつ TTY でないとメニューが出ないことがある。macOS では `script` で疑似 TTY を付ける。
+ * macOS では起動直前に [captureMacLoginPrintenv] で環境を寄せる。
  */
 private fun shellInvocation(scriptPath: Path): List<String> {
     val path = scriptPath.absolutePathString()
@@ -96,9 +178,17 @@ class ShellProcessRunner(
                 IllegalArgumentException("作業ディレクトリが存在しません: ${workingDirectory.pathString}"),
             )
         }
+        val workDirFile = File(workingDirectory.pathString)
         val pb = ProcessBuilder(shellInvocation(scriptPath))
-        pb.directory(java.io.File(workingDirectory.pathString))
-        applyPathEnvForGuiAppLaunch(pb.environment())
+        pb.directory(workDirFile)
+        val env = pb.environment()
+        val snap = if (isMacOs()) captureMacLoginPrintenv(workDirFile) else null
+        if (snap != null && snap.isNotEmpty()) {
+            env.clear()
+            env.putAll(snap)
+        } else {
+            applyPathEnvForGuiAppLaunch(env)
+        }
         pb.redirectErrorStream(false)
         try {
             val p = pb.start()
