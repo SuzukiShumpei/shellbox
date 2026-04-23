@@ -78,16 +78,23 @@ import java.awt.Window
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun App(parentWindow: Window?) {
+fun App(
+    parentWindow: Window?,
+    onExitApplication: () -> Unit,
+) {
     // Release DMG では ProGuard により viewModel() 経由の Factory デフォルト実装が壊れるため、
     // Compose の viewModel() は使わず 1 ウィンドウ 1 インスタンスで保持する。
     val vm = remember { ShellViewModel() }
-    ShellApp(vm, parentWindow)
+    ShellApp(vm, parentWindow, onExitApplication)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ShellApp(vm: ShellViewModel, parentWindow: Window?) {
+fun ShellApp(
+    vm: ShellViewModel,
+    parentWindow: Window?,
+    onExitApplication: () -> Unit,
+) {
     val settings by vm.settings.collectAsState()
     val scripts by vm.scripts.collectAsState()
     val scanError by vm.scanError.collectAsState()
@@ -120,6 +127,15 @@ fun ShellApp(vm: ShellViewModel, parentWindow: Window?) {
                                 contentDescription = "スクリプト一覧を再読み込み",
                             )
                         }
+                    }
+                    TextButton(
+                        onClick = onExitApplication,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) {
+                        Text(
+                            text = "終了",
+                            style = MaterialTheme.typography.labelLarge,
+                        )
                     }
                 },
             )

@@ -114,7 +114,10 @@ fun main() = application {
                     w.isAlwaysOnTop = prev
                 }
             }
-            App(window)
+            App(
+                parentWindow = window,
+                onExitApplication = { exitApplication() },
+            )
         }
     }
 }
