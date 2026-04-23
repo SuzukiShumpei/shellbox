@@ -28,6 +28,40 @@ private fun isMacOs(): Boolean {
 }
 
 /**
+ * Finder や DMG から起動した .app はターミナルと違い [user.home]/.zshrc 相当の PATH が入らない。
+ * `adb` / `ffmpeg` 等が [PATH] に無いとスクリプトは「成功」に見えて実際は空出力になる。
+ * 一般的な Android SDK / Homebrew の bin を先頭に足す（存在しなくても害はない）。
+ */
+private fun pathPrependForMacDmgApp(home: String): List<String> = listOf(
+    "$home/Library/Android/sdk/platform-tools",
+    "$home/Android/Sdk/platform-tools",
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+)
+
+private fun mergePathEnv(current: String?, prepend: List<String>): String {
+    val base = (current ?: System.getenv("PATH") ?: "/usr/bin:/bin:/usr/sbin:/sbin")
+    val tail = base.split(":")
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+    val head = prepend.map { it.trimEnd('/') }
+    return (head + tail)
+        .distinct()
+        .joinToString(":")
+}
+
+/** DMG から起動する GUI .app 向け。Windows の [PATH] は区切りが `;` のため、ここでは手を出さない。 */
+private fun applyPathEnvForGuiAppLaunch(env: MutableMap<String, String>) {
+    if (!isMacOs()) {
+        return
+    }
+    val home = System.getProperty("user.home") ?: return
+    env["PATH"] = mergePathEnv(env["PATH"], pathPrependForMacDmgApp(home))
+}
+
+/**
  * パイプ実行だと bash の `select` や `read -p` のプロンプトが stderr バッファに留まり、
  * かつ TTY でないとメニューが出ないことがある。macOS では `script` で疑似 TTY を付ける。
  */
@@ -64,6 +98,7 @@ class ShellProcessRunner(
         }
         val pb = ProcessBuilder(shellInvocation(scriptPath))
         pb.directory(java.io.File(workingDirectory.pathString))
+        applyPathEnvForGuiAppLaunch(pb.environment())
         pb.redirectErrorStream(false)
         try {
             val p = pb.start()
