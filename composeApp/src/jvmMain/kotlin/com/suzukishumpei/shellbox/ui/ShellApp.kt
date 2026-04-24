@@ -646,9 +646,9 @@ private fun DetailScreen(
     onClearImportScript: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             OutlinedButton(onClick = onBack) { Text("戻る") }
             Spacer(modifier = Modifier.width(8.dp))
@@ -691,7 +691,10 @@ private fun DetailScreen(
             color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.bodySmall,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
             OutlinedButton(onClick = onUseProjectRoot) { Text("実行 path 指定なし") }
             OutlinedButton(onClick = onPickCwd) { Text("実行 path を選択") }
             Button(onClick = onRun) { Text("実行") }
