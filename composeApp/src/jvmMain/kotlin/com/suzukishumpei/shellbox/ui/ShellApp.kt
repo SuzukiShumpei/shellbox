@@ -55,8 +55,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
@@ -76,6 +79,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.suzukishumpei.shellbox.domain.ScriptEntry
 import com.suzukishumpei.shellbox.runtime.LogStream
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.awt.Window
 
@@ -828,6 +832,9 @@ private fun ImportScriptDialog(
 
 private const val RunDialogAutoDismissMs = 700L
 
+/** 下端からこの距離以内なら「追従モード」とみなす（手動で少し上げただけで追従を切らないための余裕） */
+private val RunDialogLogBottomSlop = 48.dp
+
 @Composable
 private fun RunDialog(
     state: RunDialogState,
@@ -837,10 +844,53 @@ private fun RunDialog(
 ) {
     var stdinLine by remember(state.scriptId) { mutableStateOf("") }
 
+    val scrollState = rememberScrollState()
+    val bottomSlopPx = with(LocalDensity.current) { RunDialogLogBottomSlop.roundToPx() }
+    var followEnd by remember { mutableStateOf(true) }
+
     LaunchedEffect(state.scriptId, state.exitCode) {
         if (state.exitCode != null && !state.isRunning) {
             delay(RunDialogAutoDismissMs)
             onDismiss()
+        }
+    }
+
+    LaunchedEffect(state.isRunning, state.logs.isEmpty(), state.scriptId) {
+        if (state.isRunning && state.logs.isEmpty()) {
+            followEnd = true
+            scrollState.scrollTo(0)
+        }
+    }
+
+    LaunchedEffect(scrollState, bottomSlopPx) {
+        var lastMax = -1
+        snapshotFlow { scrollState.value to scrollState.maxValue }
+            .distinctUntilChanged()
+            .collect { (value, max) ->
+                when {
+                    max <= 0 -> {
+                        followEnd = true
+                        lastMax = max
+                    }
+                    max > lastMax -> {
+                        lastMax = max
+                    }
+                    else -> {
+                        followEnd = (max - value <= bottomSlopPx)
+                        lastMax = max
+                    }
+                }
+            }
+    }
+
+    LaunchedEffect(state.logs.size) {
+        if (!followEnd) return@LaunchedEffect
+        while (true) {
+            if (!followEnd) return@LaunchedEffect
+            val max = scrollState.maxValue
+            scrollState.scrollTo(max)
+            withFrameNanos { }
+            if (scrollState.maxValue == max) break
         }
     }
 
@@ -902,7 +952,7 @@ private fun RunDialog(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .verticalScroll(rememberScrollState()),
+                        .verticalScroll(scrollState),
                 ) {
                     Text(
                         text = logAnnotated,
