@@ -65,8 +65,11 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -841,6 +844,27 @@ private fun RunDialog(
         }
     }
 
+    val scheme = MaterialTheme.colorScheme
+    val logAnnotated = remember(state.logs, scheme) {
+        buildAnnotatedString {
+            state.logs.forEachIndexed { index, line ->
+                if (index > 0) append('\n')
+                val color = when (line.stream) {
+                    LogStream.Out -> scheme.onSurface
+                    LogStream.Err -> scheme.error
+                }
+                withStyle(
+                    SpanStyle(
+                        color = color,
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                ) {
+                    append(line.text)
+                }
+            }
+        }
+    }
+
     Dialog(
         onDismissRequest = { if (!state.isRunning) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -874,24 +898,17 @@ private fun RunDialog(
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
-                LazyColumn(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                SelectionContainer(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
                 ) {
-                    items(state.logs.size) { i ->
-                        val line = state.logs[i]
-                        val color = when (line.stream) {
-                            LogStream.Out -> MaterialTheme.colorScheme.onSurface
-                            LogStream.Err -> MaterialTheme.colorScheme.error
-                        }
-                        Text(
-                            text = line.text,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = color,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
+                    Text(
+                        text = logAnnotated,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(
