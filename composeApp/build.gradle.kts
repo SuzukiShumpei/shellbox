@@ -43,7 +43,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg)
             packageName = "Shell Box"
-            packageVersion = "1.0.1"
+            packageVersion = "1.0.2"
             macOS {
                 bundleID = "com.suzukishumpei.shellbox"
                 infoPlist {
